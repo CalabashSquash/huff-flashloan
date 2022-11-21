@@ -1,0 +1,264 @@
+/* Interface */
+#define function setPermed(address) nonpayable returns ()
+#define function getPermed(address) nonpayable returns (uint256)
+#define function take(address, address, uint256) nonpayable returns ()
+#define function deposit(address,uint256) nonpayable returns (address)
+#define function getDeposited(address, address) nonpayable returns (uint256)
+#define function getOwner() nonpayable returns (address)
+#define function setOwner(address) nonpayable returns ()
+
+/* FlashLoanReceiver */
+#define function flashloanReceiver(bytes) nonpayable returns ()
+
+/* ERC20 */
+#define function transfer(address,uint256) nonpayable returns ()
+#define function transferFrom(address,address,uint256) nonpayable returns (bool)
+
+/* CONTRACT STORAGE */
+#define constant TOKEN_LOCATION = FREE_STORAGE_POINTER()
+
+#define constant OWNER = FREE_STORAGE_POINTER()
+
+#define constant ARG_SIZE = 0x14
+
+/* ERRORS */
+#define error OnlyOwnerError()
+#define error OnlyPermedError()
+
+/**
+ * @notice contstructor(address owner)
+ * @param owner The contract's owner address.
+ */
+#define macro CONSTRUCTOR() = takes (0) returns (0) {
+    [ARG_SIZE]     // [arg_size]
+    dup1           // [arg_size, arg_size]
+    codesize       // [code_size, arg_size, arg_size]
+    sub            // [code_size - arg_size, arg_size]
+    0x00           // [mem_offset, code_size_wo_arg, arg_size]
+    codecopy       // [] 
+    0x00           // [mem_offset]
+    mload          // [owner]
+    0x60 shr       // [owner]
+    [OWNER] sstore // []
+}
+
+#define macro GET_SLOT_2D(mem_ptr) = takes (2) returns (1) {
+    // Input stack: [key1, key2]
+    // <mem_ptr>           // [mem_ptr, key1, key2]
+    <mem_ptr>
+    mstore              // [key2]
+    <mem_ptr> 0x20 add  // [mem_ptr + 32, key2]
+    mstore              // []
+    0x40                // [64]
+    <mem_ptr>           // [mem_ptr, 64]
+    sha3                // [slot]
+    // Output stack: [slot]
+}
+
+#define macro GET_SLOT(mem_ptr) = takes (1) returns (1) {
+    // Input stack: [key]
+    <mem_ptr>           // [mem_ptr, key]
+    mstore              // []
+    0x20                // [32]
+    <mem_ptr>           // [mem_ptr, 32]
+    sha3                // [slot]
+    // Output stack: [slot]
+}
+
+#define macro SSTORE_KEY(mem_ptr) = takes (1) returns (0) {
+    // Input stack: [key]
+    GET_SLOT(<mem_ptr>)   // [slot]
+    sstore              // []
+    // Output stack: []
+}
+
+#define macro SLOAD_KEY(mem_ptr) = takes (1) returns (0) {
+    // Input stack: [key]
+    GET_SLOT(<mem_ptr>)   // [slot]
+    sload                 // [value]
+    // Output stack: [value]
+}
+
+#define macro ONLY_OWNER() = takes (0) returns (0) {
+    caller                  // [caller]
+    [OWNER] sload           // [owner, caller]
+    eq                      // [owner == caller]
+    continue                // [continue, owner == caller]
+    jumpi                   // []
+    
+    __ERROR(OnlyOwnerError) // [panic_code]
+    PANIC()
+    continue:
+}
+
+#define macro ONLY_PERMED() = takes (0) returns (0) {
+    0x01                     // [1]
+    caller                   // [caller, 1]
+    SLOAD_KEY(0x00)          // [isPermed, 1]
+    eq                       // [isPermed == 1]
+    continue                 // [continue, isPermed == 1]
+    jumpi                    // []
+
+    __ERROR(OnlyPermedError) // [panic_code]
+    PANIC()
+    continue:
+}
+
+
+//                                        //
+// ========= EXTERNAL FUNCTIONS ========= //
+//                                        //
+
+#define macro GET_OWNER() = takes (0) returns (0) {
+    // Load value from storage.
+    [OWNER]             // [ptr]
+    sload               // [owner]
+
+    // Store value in memory.
+    0x00 mstore         // []
+
+    // Return value
+    0x20 0x00 return    // []
+}
+
+#define macro SET_OWNER() = takes (0) returns (0) {
+    ONLY_OWNER()
+    0x04 calldataload   // [address]
+    [OWNER]             // [key, address]
+    sstore
+}
+
+#define macro GET_PERMED() = takes (0) returns (0) {
+    0x04 calldataload   // [address]
+    // Here, the slot key is the address being queried.
+    SLOAD_KEY(0x00)  // [isPermed]
+    0x00 mstore         // []
+    0x20 0x00 return    // []
+}
+
+#define macro SET_PERMED() = takes (0) returns (0) {
+    0x01                // [1]
+    0x04 calldataload   // [address, 1]
+    // Here, the slot key is the address being queried.
+    GET_SLOT(0x00)      // [slot, 1]
+    sstore              // []
+}
+
+#define macro SET_WHITELISTED() = takes (0) returns (0) {
+
+}
+
+// Arg 1: Token
+// Arg 2: Amount
+#define macro DEPOSIT() = takes(0) returns (0) {
+    // First, store the transferFrom arguments in memory.
+    __FUNC_SIG(transferFrom) // [sig(transferFrom)]
+    0xe0 shl 
+    0x00                // [0, sig(transferFrom)]
+    mstore              // []
+
+    // Memory: [sig]
+
+    caller              // [caller]
+    0x04                // [4, caller]
+    mstore              // []
+    // Memory: [sig, caller]
+    address             // [address(this)]
+    0x24                // [32]
+    mstore              // []
+    // Memory: [sig, caller, address(this)]
+    0x20                // [32]
+    0x24                // [36, 32]
+    0x44                // [64, 36, 32]
+    calldatacopy        // []
+    // Memory: [sig, caller, address(this), amount]
+
+    0x20                // [32]
+    0x80                // [128, 32], Offset the return value in 4th memory slot.
+    0x64                // [96, 128, 32]
+    0x00                // [0, 96, 128, 32], Arguments are 3 slots long + calldata, starting at offset 0.
+    0x00                // [0, 0, 96, 128, 32], 0 msg.value
+    0x04 calldataload   // [token, 0, 0, 96, 128, 32]
+    gas                 // [gas, token, 0, 0, 96, 128, 32]
+    call                // [success]
+    storeDeposit jumpi
+
+    0x00 0x00 revert    // TODO revert with data.
+
+    // Memory pointer = 128 = 0x80
+    storeDeposit:
+        0x24 calldataload   // [amount]
+        caller              // [caller, amount]
+        0x04 calldataload   // [token, caller, amount]
+        GET_SLOT_2D(0x80)   // [slot, amount]
+        sstore
+}
+
+#define macro GET_DEPOSITED(mem_ptr) = takes(2) returns (1) {
+    // Input stack: [token, user]
+    GET_SLOT_2D(<mem_ptr>) // [slot]
+    sload                     // [deposited]
+}
+
+// Arg 1: User address
+// Arg 2: Token address
+#define macro GET_DEPOSITED_EXTERNAL() = takes(0) returns (0) {
+    0x04 calldataload       // [user]
+    0x24 calldataload       // [token, user]
+    GET_DEPOSITED(0x00)     // [deposited]
+    
+    // Store value in memory.
+    0x00 mstore             // []
+    // Return value
+    0x20 0x00 return        // []
+}
+
+// Arg 1: FlashLoanReceiver address
+// Arg 2: Token address
+// Arg 3: Token amount
+#define macro TAKE() = takes(0) returns (0) {
+    ONLY_PERMED()
+}
+
+#define macro PANIC() = takes(1) returns (0) {
+    // Input stack:          [panic_selector]
+    0x00 mstore           // []
+    0x24 0x00 revert
+}
+
+#define macro MAIN() = takes (0) returns (0) {
+    // Identify which function is being called.
+    0x00 calldataload 0xE0 shr
+    dup1 __FUNC_SIG(setPermed) eq set jumpi
+    dup1 __FUNC_SIG(getPermed) eq get jumpi
+    dup1 __FUNC_SIG(deposit) eq deposit jumpi
+    dup1 __FUNC_SIG(getDeposited) eq getDeposited jumpi
+    dup1 __FUNC_SIG(take) eq take jumpi
+    dup1 __FUNC_SIG(getOwner) eq owner jumpi
+    dup1 __FUNC_SIG(setOwner) eq setOwner jumpi
+
+    0x00 0x00 revert
+
+    set:
+        SET_PERMED()
+    0x00 0x00 return
+    get:
+        GET_PERMED()
+    0x00 0x00 return
+    deposit:
+        DEPOSIT()
+    0x00 0x00 return
+    getDeposited:
+        GET_DEPOSITED_EXTERNAL()
+    0x00 0x00 return
+    take:
+        TAKE()
+    0x00 0x00 return
+    owner:
+        GET_OWNER()
+    0x00 0x00 return
+    setOwner:
+        SET_OWNER()
+    0x00 0x00 return
+
+}
