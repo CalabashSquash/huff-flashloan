@@ -2,7 +2,8 @@
 #define function setPermed(address) nonpayable returns ()
 #define function getPermed(address) nonpayable returns (uint256)
 #define function take(address, address, uint256) nonpayable returns ()
-#define function deposit(address,uint256) nonpayable returns (address)
+#define function deposit(address,uint256) nonpayable returns ()
+#define function withdraw(address,uint256) nonpayable returns ()
 #define function getDeposited(address, address) nonpayable returns (uint256)
 #define function getOwner() nonpayable returns (address)
 #define function setOwner(address) nonpayable returns ()
@@ -144,6 +145,12 @@
     sstore              // []
 }
 
+#define macro GET_DEPOSITED(mem_ptr) = takes(2) returns (1) {
+    // Input stack: [token, user]
+    GET_SLOT_2D(<mem_ptr>)    // [slot]
+    sload                     // [deposited]
+}
+
 #define macro SET_WHITELISTED() = takes (0) returns (0) {
 
 }
@@ -175,11 +182,11 @@
 
     0x20                // [32]
     0x80                // [128, 32], Offset the return value in 4th memory slot.
-    0x64                // [96, 128, 32]
-    0x00                // [0, 96, 128, 32], Arguments are 3 slots long + calldata, starting at offset 0.
-    0x00                // [0, 0, 96, 128, 32], 0 msg.value
-    0x04 calldataload   // [token, 0, 0, 96, 128, 32]
-    gas                 // [gas, token, 0, 0, 96, 128, 32]
+    0x64                // [100, 128, 32]
+    0x00                // [0, 100, 128, 32], Arguments are 3 slots long + calldata, starting at offset 0.
+    0x00                // [0, 0, 100, 128, 32], 0 msg.value
+    0x04 calldataload   // [token, 0, 0, 100, 128, 32]
+    gas                 // [gas, token, 0, 0, 100, 128, 32]
     call                // [success]
     storeDeposit jumpi
 
@@ -194,10 +201,52 @@
         sstore
 }
 
-#define macro GET_DEPOSITED(mem_ptr) = takes(2) returns (1) {
-    // Input stack: [token, user]
-    GET_SLOT_2D(<mem_ptr>) // [slot]
-    sload                     // [deposited]
+// Arg 1: Token
+// Arg 2: Amount
+#define macro WITHDRAW() = takes(0) returns (0) {
+    // First, store the transferFrom arguments in memory.
+    __FUNC_SIG(transfer) // [sig(transfer)]
+    0xe0 shl 
+    0x00                // [0, sig(transfer)]
+    mstore              // []
+
+    // Memory: [sig]
+
+    caller              // [caller]
+    0x04                // [4, caller]
+    mstore              // []
+    // Memory: [sig, caller]
+    0x20                // [32]
+    0x24                // [36, 32]
+    0x24                // [36, 36, 32]
+    calldatacopy        // []
+    // Memory: [sig, caller, amount]
+
+    0x20                // [32]
+    0x80                // [128, 32], Offset the return value in 4th memory slot.
+    0x44                // [68, 128, 32]
+    0x00                // [0, 68, 128, 32], Arguments are 2 slots long + calldata, starting at offset 0.
+    0x00                // [0, 0, 68, 128, 32], 0 msg.value
+    0x04 calldataload   // [token, 0, 0, 68, 128, 32]
+    gas                 // [gas, token, 0, 0, 100, 128, 32]
+    call                // [success]
+    storeDeposit jumpi
+
+    0x00 0x00 revert    // TODO revert with data.
+
+    // Memory pointer = 128 = 0x80
+    // TODO this can likely be optimised.
+    storeWithdraw:
+        0x24 calldataload   // [amount]
+        caller              // [caller, amount]
+        0x04 calldataload   // [token, caller, amount]
+        GET_SLOT_2D(0x80)   // [slot, amount]
+        swap2               // [amount, slot]
+        dup2                // [slot, amount, slot]
+        sload               // [deposited, amount, slot]
+        sub                 // [deposited - amount, slot]
+        swap1               // [slot, deposited - amount]
+        sstore
 }
 
 // Arg 1: User address
@@ -232,6 +281,7 @@
     dup1 __FUNC_SIG(setPermed) eq set jumpi
     dup1 __FUNC_SIG(getPermed) eq get jumpi
     dup1 __FUNC_SIG(deposit) eq deposit jumpi
+    dup1 __FUNC_SIG(withdraw) eq withdraw jumpi
     dup1 __FUNC_SIG(getDeposited) eq getDeposited jumpi
     dup1 __FUNC_SIG(take) eq take jumpi
     dup1 __FUNC_SIG(getOwner) eq owner jumpi
@@ -247,6 +297,9 @@
     0x00 0x00 return
     deposit:
         DEPOSIT()
+    0x00 0x00 return
+    withdraw:
+        WITHDRAW()
     0x00 0x00 return
     getDeposited:
         GET_DEPOSITED_EXTERNAL()

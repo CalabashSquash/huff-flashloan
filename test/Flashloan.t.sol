@@ -51,6 +51,22 @@ contract FlashloanTest is Test {
         assertEq(deposited, amount);
         assertEq(balance, amount);
     }
+
+    function testWithdraw(uint256 depositAmount, uint256 withdrawAmount)
+        public
+    {
+        vm.assume(withdrawAmount <= depositAmount);
+        MockERC20 token = new MockERC20("Test", "TST", 18, depositAmount);
+        token.approve(address(flashloan), depositAmount);
+        flashloan.deposit(address(token), depositAmount);
+        uint256 preUserBal = token.balanceOf(address(this));
+        uint256 preContractBal = token.balanceOf(address(flashloan));
+        flashloan.withdraw(address(token), withdrawAmount);
+        uint256 postUserBal = token.balanceOf(address(this));
+        uint256 postContractBal = token.balanceOf(address(flashloan));
+        assertEq(postUserBal, preUserBal + withdrawAmount);
+        assertEq(postContractBal, preContractBal - withdrawAmount);
+    }
 }
 
 interface Flashloan {
@@ -63,6 +79,8 @@ interface Flashloan {
     function setOwner(address) external;
 
     function deposit(address, uint256) external;
+
+    function withdraw(address, uint256) external;
 
     function getDeposited(address, address) external returns (uint256);
 }
